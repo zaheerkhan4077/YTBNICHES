@@ -14,7 +14,6 @@ CACHE_TTL_SECONDS = 24 * 60 * 60
 SAFETY_MAX_IDS = 500
 
 # -------- COUNTRIES (ISO -> Name) --------
-# Keep a reasonable list; extend if you want more countries.
 COUNTRIES = {
     "IN": "India", "ID": "Indonesia", "IR": "Iran", "IE": "Ireland", "IS": "Iceland",
     "IT": "Italy", "IL": "Israel", "IQ": "Iraq", "US": "United States", "GB": "United Kingdom",
@@ -70,22 +69,25 @@ is_select = (mode == "Select")
 
 col1, col2, col3, col4 = st.columns([2,2,1,1])
 
-# REGION: single input with inline suggestions
+# REGION: single input; suggestions appear inline after 1 character;
+# clicking a suggestion auto-fills the same input (ISO code) and refreshes UI
 with col1:
-    st.write("Region code (e.g. US, IN)")
-    region_query = st.text_input("Type country code or name", value="", placeholder="#SELECT COUNTRY", key="region_query")
-    suggestions = get_country_suggestions(region_query)
-    selected_region = st.session_state.get("selected_region_code", "")
-    # show suggestions under the input (only when there are matches)
+    # single input (no extra header line)
+    region_query = st.text_input("Type country code or name", value=st.session_state.get("region_query", ""), placeholder="#SELECT COUNTRY", key="region_input")
+    # show suggestions when user typed at least 1 character
+    suggestions = get_country_suggestions(region_query) if (region_query and len(region_query.strip()) >= 1) else []
     if suggestions:
-        options = ["-- choose --"] + [f"{c} - {n}" for c,n in suggestions]
-        sel = st.selectbox("Suggestions (pick one)", options, index=0, key="region_suggestions")
+        # build option strings
+        option_list = ["-- choose --"] + [f"{c} - {n}" for c, n in suggestions]
+        sel = st.selectbox("Suggestions (click to fill)", option_list, index=0, key="region_suggestions_box")
         if sel != "-- choose --":
-            code = sel.split(" - ")[0]
-            st.session_state["selected_region_code"] = code
-            selected_region = code
-    # always show the selected region code in a readonly field
-    st.text_input("Selected region code (used by app)", value=selected_region, disabled=True, key="selected_region_display")
+            # user picked a suggestion -> write its ISO code into the same input by updating session_state,
+            # then rerun so input shows ISO immediately
+            chosen_code = sel.split(" - ")[0]
+            st.session_state["region_query"] = chosen_code
+            st.session_state["region_input"] = chosen_code
+            # clear the selectbox selection to avoid repeated action next run
+            st.experimental_rerun()
 
 # DAYS (disabled when trending)
 with col2:
@@ -107,7 +109,7 @@ min_views = st.number_input("Minimum total views filter (0 to skip)", min_value=
 st.caption("Cache will save results for 24 hours. Keep keywords and max results small to save quota.")
 
 if is_trending:
-    st.info("Trending mode: Days and Keywords are disabled. Region remains editable; pick a country using suggestions above.")
+    st.info("Trending mode: Days and Keywords are disabled. Use Region input above to choose a country (type 1 character to get suggestions).")
 
 # -------- CACHED API CALLS --------
 @st.cache_data(ttl=CACHE_TTL_SECONDS, show_spinner=False)
@@ -197,17 +199,22 @@ if st.button("ENTER"):
     if is_select:
         st.error("Select a mode first.")
     else:
-        selected_region = st.session_state.get("selected_region_code", "")
-        # if user typed a 2-letter code directly, accept it
-        if not selected_region and region_query and len(region_query.strip()) == 2:
-            selected_region = region_query.strip().upper()
-        if not selected_region:
-            st.error("No region selected. Use the suggestions to choose a country (e.g., type 'IN' or 'India').")
+        # region selection priority:
+        # 1) if region_input is a two-letter code -> use that
+        # 2) else if session_state region_query exists (set by suggestion when selected) use that
+        # 3) else error
+        region_val = st.session_state.get("region_query") or st.session_state.get("region_input", "")
+        if region_val and len(region_val.strip()) == 2:
+            region_code = region_val.strip().upper()
         else:
+            st.error("No valid region selected. Type a character and pick a suggestion (example: type 'I' then choose 'IN - India').")
+            region_code = None
+
+        if region_code:
             try:
                 if is_trending:
                     with st.spinner("Fetching trending videos..."):
-                        rows = fetch_trending(selected_region, max_results, api_key)
+                        rows = fetch_trending(region_code, max_results, api_key)
                 else:
                     days_val = st.session_state.get("days_select", "Select")
                     if days_val == "Select":
@@ -221,7 +228,7 @@ if st.button("ENTER"):
                             rows = []
                         else:
                             with st.spinner("Searching keywords..."):
-                                rows = fetch_keywords(keywords, days_int, selected_region, min(max_results, 25), api_key)
+                                rows = fetch_keywords(keywords, days_int, region_code, min(max_results, 25), api_key)
 
                 if not rows:
                     st.info("No results found.")
