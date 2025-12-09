@@ -42,6 +42,10 @@ def get_country_suggestions(q: str) -> List[Tuple[str,str]]:
     out.sort(key=lambda x: (x[0], x[1]))
     return out
 
+# callback for suggestion buttons (safe)
+def set_region_code(code: str):
+    st.session_state["region_input"] = code
+
 # -------- UI --------
 st.set_page_config(layout="wide", page_title="YTBNICHES- Your Personalized data Extractor")
 st.title("YTBNICHES- Your Personalized data Extractor")
@@ -69,27 +73,25 @@ is_select = (mode == "Select")
 
 col1, col2, col3, col4 = st.columns([2,2,1,1])
 
-# REGION: single input; suggestions will appear inline as clickable buttons
+# REGION: single input; suggestions will appear inline as clickable buttons (use on_click)
 with col1:
-    # keep the same key 'region_input' so session_state persists
-    default_region_value = st.session_state.get("region_input", "")
-    region_query = st.text_input("Type country code or name", value=default_region_value, placeholder="#SELECT COUNTRY", key="region_input")
+    # use session_state value if present so the text_input reflects selection
+    default_val = st.session_state.get("region_input", "")
+    region_query = st.text_input("Type country code or name", value=default_val, placeholder="#SELECT COUNTRY", key="region_input")
     # show inline suggestion buttons after 1 character
     suggestions = get_country_suggestions(region_query) if (region_query and len(region_query.strip()) >= 1) else []
     if suggestions:
-        # limit to first 10 suggestions to avoid huge button rows
         suggestions = suggestions[:10]
-        # display suggestions as buttons in rows of up to 5
         per_row = 5
         for i in range(0, len(suggestions), per_row):
             row = suggestions[i:i+per_row]
             cols = st.columns(len(row))
             for cidx, (code, name) in enumerate(row):
                 label = f"{code} - {name}"
-                if cols[cidx].button(label):
-                    # set the same input value to ISO code and rerun
-                    st.session_state["region_input"] = code
-                    st.experimental_rerun()
+                # create unique key for each button to avoid collisions
+                btn_key = f"rg_btn_{code}_{i}_{cidx}"
+                # use on_click callback to set region safely
+                cols[cidx].button(label, key=btn_key, on_click=set_region_code, args=(code,))
 
 # DAYS (disabled when trending)
 with col2:
