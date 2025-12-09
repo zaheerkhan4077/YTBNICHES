@@ -6,10 +6,6 @@ from typing import List
 import requests
 import pandas as pd
 import streamlit as st
-from dotenv import load_dotenv
-
-# Load local .env if present (useful for local testing)
-load_dotenv()
 
 # Constants
 YT_SEARCH = "https://www.googleapis.com/youtube/v3/search"
