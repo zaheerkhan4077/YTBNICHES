@@ -13,15 +13,53 @@ YT_VIDEOS = "https://www.googleapis.com/youtube/v3/videos"
 CACHE_TTL_SECONDS = 24 * 60 * 60
 SAFETY_MAX_IDS = 500
 
-# -------- COUNTRIES (ISO -> Name) --------
+# -------- FULL COUNTRY LIST (ISO -> Name) --------
+# Top/common list; extend as needed. Each option shown as "CC - Country Name".
 COUNTRIES = {
-    "IN": "India", "ID": "Indonesia", "IR": "Iran", "IE": "Ireland", "IS": "Iceland",
-    "IT": "Italy", "IL": "Israel", "IQ": "Iraq", "US": "United States", "GB": "United Kingdom",
-    "AU": "Australia", "CA": "Canada", "DE": "Germany", "FR": "France", "JP": "Japan",
-    "KR": "South Korea", "BR": "Brazil", "RU": "Russia", "MX": "Mexico", "ES": "Spain",
-    "NL": "Netherlands", "SE": "Sweden", "CH": "Switzerland", "SG": "Singapore", "PH": "Philippines",
-    "PK": "Pakistan", "BD": "Bangladesh", "NG": "Nigeria", "EG": "Egypt", "ZA": "South Africa"
+    "AF": "Afghanistan","AL": "Albania","DZ": "Algeria","AS": "American Samoa","AD": "Andorra",
+    "AO": "Angola","AG": "Antigua and Barbuda","AR": "Argentina","AM": "Armenia","AU": "Australia",
+    "AT": "Austria","AZ": "Azerbaijan","BS": "Bahamas","BH": "Bahrain","BD": "Bangladesh",
+    "BB": "Barbados","BY": "Belarus","BE": "Belgium","BZ": "Belize","BJ": "Benin",
+    "BT": "Bhutan","BO": "Bolivia","BA": "Bosnia and Herzegovina","BW": "Botswana","BR": "Brazil",
+    "BN": "Brunei","BG": "Bulgaria","BF": "Burkina Faso","BI": "Burundi","KH": "Cambodia",
+    "CM": "Cameroon","CA": "Canada","CV": "Cabo Verde","KY": "Cayman Islands","CF": "Central African Republic",
+    "TD": "Chad","CL": "Chile","CN": "China","CO": "Colombia","KM": "Comoros",
+    "CG": "Congo - Brazzaville","CD": "Congo - Kinshasa","CR": "Costa Rica","CI": "Côte d’Ivoire","HR": "Croatia",
+    "CU": "Cuba","CY": "Cyprus","CZ": "Czechia","DK": "Denmark","DJ": "Djibouti",
+    "DM": "Dominica","DO": "Dominican Republic","EC": "Ecuador","EG": "Egypt","SV": "El Salvador",
+    "GQ": "Equatorial Guinea","ER": "Eritrea","EE": "Estonia","SZ": "Eswatini","ET": "Ethiopia",
+    "FJ": "Fiji","FI": "Finland","FR": "France","GA": "Gabon","GM": "Gambia",
+    "GE": "Georgia","DE": "Germany","GH": "Ghana","GR": "Greece","GD": "Grenada",
+    "GT": "Guatemala","GN": "Guinea","GW": "Guinea-Bissau","GY": "Guyana","HT": "Haiti",
+    "HN": "Honduras","HK": "Hong Kong","HU": "Hungary","IS": "Iceland","IN": "India",
+    "ID": "Indonesia","IR": "Iran","IQ": "Iraq","IE": "Ireland","IL": "Israel",
+    "IT": "Italy","JM": "Jamaica","JP": "Japan","JO": "Jordan","KZ": "Kazakhstan",
+    "KE": "Kenya","KI": "Kiribati","KP": "North Korea","KR": "South Korea","KW": "Kuwait",
+    "KG": "Kyrgyzstan","LA": "Laos","LV": "Latvia","LB": "Lebanon","LS": "Lesotho",
+    "LR": "Liberia","LY": "Libya","LI": "Liechtenstein","LT": "Lithuania","LU": "Luxembourg",
+    "MO": "Macao","MG": "Madagascar","MW": "Malawi","MY": "Malaysia","MV": "Maldives",
+    "ML": "Mali","MT": "Malta","MH": "Marshall Islands","MR": "Mauritania","MU": "Mauritius",
+    "MX": "Mexico","FM": "Micronesia","MD": "Moldova","MC": "Monaco","MN": "Mongolia",
+    "ME": "Montenegro","MA": "Morocco","MZ": "Mozambique","MM": "Myanmar","NA": "Namibia",
+    "NR": "Nauru","NP": "Nepal","NL": "Netherlands","NZ": "New Zealand","NI": "Nicaragua",
+    "NE": "Niger","NG": "Nigeria","MK": "North Macedonia","NO": "Norway","OM": "Oman",
+    "PK": "Pakistan","PW": "Palau","PA": "Panama","PG": "Papua New Guinea","PY": "Paraguay",
+    "PE": "Peru","PH": "Philippines","PL": "Poland","PT": "Portugal","QA": "Qatar",
+    "RO": "Romania","RU": "Russia","RW": "Rwanda","KN": "St Kitts & Nevis","LC": "St Lucia",
+    "VC": "St Vincent & Grenadines","WS": "Samoa","SM": "San Marino","ST": "Sao Tome & Principe","SA": "Saudi Arabia",
+    "SN": "Senegal","RS": "Serbia","SC": "Seychelles","SL": "Sierra Leone","SG": "Singapore",
+    "SK": "Slovakia","SI": "Slovenia","SB": "Solomon Islands","SO": "Somalia","ZA": "South Africa",
+    "ES": "Spain","LK": "Sri Lanka","SD": "Sudan","SR": "Suriname","SE": "Sweden",
+    "CH": "Switzerland","SY": "Syria","TW": "Taiwan","TJ": "Tajikistan","TZ": "Tanzania",
+    "TH": "Thailand","TL": "Timor-Leste","TG": "Togo","TO": "Tonga","TT": "Trinidad and Tobago",
+    "TN": "Tunisia","TR": "Turkey","TM": "Turkmenistan","TV": "Tuvalu","UG": "Uganda",
+    "UA": "Ukraine","AE": "United Arab Emirates","GB": "United Kingdom","US": "United States",
+    "UY": "Uruguay","UZ": "Uzbekistan","VU": "Vanuatu","VA": "Vatican City","VE": "Venezuela",
+    "VN": "Vietnam","YE": "Yemen","ZM": "Zambia","ZW": "Zimbabwe"
 }
+
+# Prebuild sorted options: "CC - Country Name"
+ALL_COUNTRIES_LIST = [f"{code} - {name}" for code, name in sorted(COUNTRIES.items(), key=lambda x: x[1])]
 
 # -------- HELPERS --------
 def iso_after_days(days: int) -> str:
@@ -31,20 +69,11 @@ def chunk_list(lst: List[str], n: int):
     for i in range(0, len(lst), n):
         yield lst[i:i+n]
 
-def get_country_suggestions(q: str) -> List[Tuple[str,str]]:
-    q = (q or "").strip().lower()
-    if not q:
-        return []
-    out = []
-    for code, name in COUNTRIES.items():
-        if code.lower().startswith(q) or name.lower().startswith(q):
-            out.append((code, name))
-    out.sort(key=lambda x: (x[0], x[1]))
-    return out
-
-# callback for suggestion buttons (safe)
-def set_region_code(code: str):
-    st.session_state["region_input"] = code
+def code_from_option(opt: str) -> str:
+    # opt format "CC - Country Name"
+    if not opt:
+        return ""
+    return opt.split(" - ")[0].strip().upper()
 
 # -------- UI --------
 st.set_page_config(layout="wide", page_title="YTBNICHES- Your Personalized data Extractor")
@@ -73,25 +102,11 @@ is_select = (mode == "Select")
 
 col1, col2, col3, col4 = st.columns([2,2,1,1])
 
-# REGION: single input; suggestions will appear inline as clickable buttons (use on_click)
+# REGION: searchable dropdown with built-in filter (selectbox)
 with col1:
-    # use session_state value if present so the text_input reflects selection
-    default_val = st.session_state.get("region_input", "")
-    region_query = st.text_input("Type country code or name", value=default_val, placeholder="#SELECT COUNTRY", key="region_input")
-    # show inline suggestion buttons after 1 character
-    suggestions = get_country_suggestions(region_query) if (region_query and len(region_query.strip()) >= 1) else []
-    if suggestions:
-        suggestions = suggestions[:10]
-        per_row = 5
-        for i in range(0, len(suggestions), per_row):
-            row = suggestions[i:i+per_row]
-            cols = st.columns(len(row))
-            for cidx, (code, name) in enumerate(row):
-                label = f"{code} - {name}"
-                # create unique key for each button to avoid collisions
-                btn_key = f"rg_btn_{code}_{i}_{cidx}"
-                # use on_click callback to set region safely
-                cols[cidx].button(label, key=btn_key, on_click=set_region_code, args=(code,))
+    selected_opt = st.selectbox("🔍 Region (code - country)", [""] + ALL_COUNTRIES_LIST, format_func=lambda x: x or "#SELECT COUNTRY", index=0, key="region_select")
+    # extract ISO code (used later)
+    selected_region_code = code_from_option(selected_opt) if selected_opt else ""
 
 # DAYS (disabled when trending)
 with col2:
@@ -113,7 +128,7 @@ min_views = st.number_input("Minimum total views filter (0 to skip)", min_value=
 st.caption("Cache will save results for 24 hours. Keep keywords and max results small to save quota.")
 
 if is_trending:
-    st.info("Trending mode: Days and Keywords are disabled. Use Region input above to choose a country (type 1 character to get suggestions).")
+    st.info("Trending mode: Days and Keywords are disabled. Select country from the dropdown above.")
 
 # -------- CACHED API CALLS --------
 @st.cache_data(ttl=CACHE_TTL_SECONDS, show_spinner=False)
@@ -203,14 +218,10 @@ if st.button("ENTER"):
     if is_select:
         st.error("Select a mode first.")
     else:
-        region_val = st.session_state.get("region_input", "")
-        if region_val and len(region_val.strip()) == 2:
-            region_code = region_val.strip().upper()
+        if not selected_region_code:
+            st.error("Select a country from the Region dropdown (type to search).")
         else:
-            st.error("No valid region selected. Type 1 character and click a suggestion (example: type 'I' then click 'IN - India').")
-            region_code = None
-
-        if region_code:
+            region_code = selected_region_code
             try:
                 if is_trending:
                     with st.spinner("Fetching trending videos..."):
