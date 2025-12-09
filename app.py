@@ -69,25 +69,27 @@ is_select = (mode == "Select")
 
 col1, col2, col3, col4 = st.columns([2,2,1,1])
 
-# REGION: single input; suggestions appear inline after 1 character;
-# clicking a suggestion auto-fills the same input (ISO code) and refreshes UI
+# REGION: single input; suggestions will appear inline as clickable buttons
 with col1:
-    # single input (no extra header line)
-    region_query = st.text_input("Type country code or name", value=st.session_state.get("region_query", ""), placeholder="#SELECT COUNTRY", key="region_input")
-    # show suggestions when user typed at least 1 character
+    # keep the same key 'region_input' so session_state persists
+    default_region_value = st.session_state.get("region_input", "")
+    region_query = st.text_input("Type country code or name", value=default_region_value, placeholder="#SELECT COUNTRY", key="region_input")
+    # show inline suggestion buttons after 1 character
     suggestions = get_country_suggestions(region_query) if (region_query and len(region_query.strip()) >= 1) else []
     if suggestions:
-        # build option strings
-        option_list = ["-- choose --"] + [f"{c} - {n}" for c, n in suggestions]
-        sel = st.selectbox("Suggestions (click to fill)", option_list, index=0, key="region_suggestions_box")
-        if sel != "-- choose --":
-            # user picked a suggestion -> write its ISO code into the same input by updating session_state,
-            # then rerun so input shows ISO immediately
-            chosen_code = sel.split(" - ")[0]
-            st.session_state["region_query"] = chosen_code
-            st.session_state["region_input"] = chosen_code
-            # clear the selectbox selection to avoid repeated action next run
-            st.experimental_rerun()
+        # limit to first 10 suggestions to avoid huge button rows
+        suggestions = suggestions[:10]
+        # display suggestions as buttons in rows of up to 5
+        per_row = 5
+        for i in range(0, len(suggestions), per_row):
+            row = suggestions[i:i+per_row]
+            cols = st.columns(len(row))
+            for cidx, (code, name) in enumerate(row):
+                label = f"{code} - {name}"
+                if cols[cidx].button(label):
+                    # set the same input value to ISO code and rerun
+                    st.session_state["region_input"] = code
+                    st.experimental_rerun()
 
 # DAYS (disabled when trending)
 with col2:
@@ -199,15 +201,11 @@ if st.button("ENTER"):
     if is_select:
         st.error("Select a mode first.")
     else:
-        # region selection priority:
-        # 1) if region_input is a two-letter code -> use that
-        # 2) else if session_state region_query exists (set by suggestion when selected) use that
-        # 3) else error
-        region_val = st.session_state.get("region_query") or st.session_state.get("region_input", "")
+        region_val = st.session_state.get("region_input", "")
         if region_val and len(region_val.strip()) == 2:
             region_code = region_val.strip().upper()
         else:
-            st.error("No valid region selected. Type a character and pick a suggestion (example: type 'I' then choose 'IN - India').")
+            st.error("No valid region selected. Type 1 character and click a suggestion (example: type 'I' then click 'IN - India').")
             region_code = None
 
         if region_code:
