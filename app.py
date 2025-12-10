@@ -175,11 +175,11 @@ display_mode = st.selectbox("View mode", ["Table", "Card per Video", "Card per C
 sort_by = st.selectbox("Sort by", ["views", "publishedAt", "views_per_day", "avg_views"], index=0)
 sort_order = st.radio("Order", ["Descending", "Ascending"], index=0, horizontal=True)
 # Channel avatar toggle (only fetch channels when needed)
-show_channel_avatar = st.checkbox("Show channel avatars (may use extra API calls)", value=True)
+show_channel_avatar = st.checkbox("Show channel avatars", value=True)
 # Strict region filter option
-strict_region = st.checkbox("Strict region filter (drop videos whose channel country ≠ selected region). Uses extra API calls.", value=False)
+strict_region = st.checkbox("Strict region filter (drop videos whose channel country ≠ selected region).", value=False)
 
-st.caption("Cache will save results for 24 hours. Keep keywords and max results small to save quota.")
+st.caption("Cache will save results for 24 hours.")
 
 # Clear caches on force refresh
 if force_refresh:
