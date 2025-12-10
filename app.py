@@ -178,7 +178,7 @@ display_mode = st.selectbox("View mode", ["Table", "Card per Video", "Card per C
 # New: strict region checkbox
 strict_region = st.checkbox("Strict region filter (drop videos whose channel country ≠ selected region).", value=False)
 
-st.caption("Cache will save results for 24 hours. Keep keywords and max results small to save quota.")
+st.caption("Cache will save results for 24 hours.")
 
 # Cache clear on force refresh
 if force_refresh:
