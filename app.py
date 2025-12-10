@@ -1,5 +1,4 @@
 # app.py
-# ---- only full file provided so you can replace current app.py ----
 import os
 import time
 from datetime import datetime, timedelta, timezone
@@ -15,7 +14,7 @@ YT_CHANNELS = "https://www.googleapis.com/youtube/v3/channels"
 CACHE_TTL_SECONDS = 24 * 60 * 60
 SAFETY_MAX_IDS = 500
 
-# (COUNTRIES, ALL_COUNTRIES_LIST, helpers, etc. remain identical to previous version)
+# -------- COUNTRIES (ISO -> Name) --------
 COUNTRIES = {
     "AF":"Afghanistan","AL":"Albania","DZ":"Algeria","AS":"American Samoa","AD":"Andorra",
     "AO":"Angola","AG":"Antigua and Barbuda","AR":"Argentina","AM":"Armenia","AU":"Australia",
@@ -110,9 +109,6 @@ def relative_time(published_at_iso: str) -> str:
     return f"{days//365}y ago"
 
 def parse_iso8601_duration(duration_str: str) -> str:
-    """
-    Convert ISO 8601 duration like 'PT18M57S' or 'PT1H2M3S' into human readable H:MM:SS or M:SS.
-    """
     if not duration_str:
         return ""
     s = duration_str.upper().replace("PT", "")
@@ -129,7 +125,6 @@ def parse_iso8601_duration(duration_str: str) -> str:
             elif ch == "S":
                 secs = int(num) if num else 0
             num = ""
-    # format
     if hours > 0:
         return f"{hours}:{mins:02d}:{secs:02d}"
     return f"{mins}:{secs:02d}"
@@ -138,7 +133,7 @@ def parse_iso8601_duration(duration_str: str) -> str:
 st.set_page_config(layout="wide", page_title="YTBNICHES- Your Personalized data Extractor")
 st.title("YTBNICHES- Your Personalized data Extractor")
 
-# API key retrieval (unchanged)
+# API key retrieval
 api_key = None
 try:
     api_key = st.secrets.get("YT_API_KEY")
@@ -154,7 +149,7 @@ if not api_key:
     st.warning("Add your API key in Streamlit Secrets or paste it above.")
     st.stop()
 
-# Controls (unchanged; added strict region checkbox)
+# Controls
 mode = st.selectbox("Mode", ["Select", "Keyword search (last N days)", "Trending (region)"], index=0)
 is_trending = (mode == "Trending (region)")
 is_select = (mode == "Select")
@@ -173,22 +168,30 @@ with col4:
 
 keywords_input = st.text_input("Keywords", value="", placeholder="#TYPE YOUR KEYWORDS", disabled=is_trending, key="keywords_input")
 min_views = st.number_input("Minimum total views filter (0 to skip)", min_value=0, value=0, step=100, key="min_views")
-display_mode = st.selectbox("View mode", ["Table", "Card per Video", "Card per Channel"], index=0)
 
-# New: strict region checkbox
-strict_region = st.checkbox("Strict region filter (drop videos whose channel country ≠ selected region).", value=False)
+# Display & layout controls
+display_mode = st.selectbox("View mode", ["Table", "Card per Video", "Card per Channel"], index=1)
+layout_size = st.radio("Layout size", ["Compact", "Large"], index=0, horizontal=True)
+# Sorting toolbar
+sort_by = st.selectbox("Sort by", ["views", "publishedAt", "views_per_day", "avg_views"], index=0)
+sort_order = st.radio("Order", ["Descending", "Ascending"], index=0, horizontal=True)
+# Channel avatar toggle (only fetch channels when needed)
+show_channel_avatar = st.checkbox("Show channel avatars (may use extra API calls)", value=True)
+# Strict region filter option (keeps previous behavior)
+strict_region = st.checkbox("Strict region filter (drop videos whose channel country ≠ selected region). Uses extra API calls.", value=False)
 
-st.caption("Cache will save results for 24 hours.")
+st.caption("Cache will save results for 24 hours. Keep keywords and max results small to save quota.")
 
-# Cache clear on force refresh
+# Clear caches on force refresh
 if force_refresh:
     try:
         cached_search_ids.clear()
         cached_video_stats.clear()
+        cached_channels_info.clear()
     except Exception:
         pass
 
-# -------- CACHED API CALLS (thumbnail + channelId included) --------
+# -------- CACHED API CALLS --------
 @st.cache_data(ttl=CACHE_TTL_SECONDS, show_spinner=False)
 def cached_search_ids(keyword: str, published_after: str, max_results:int, region:str, api_key:str):
     params = {
@@ -213,9 +216,9 @@ def cached_video_stats(ids: List[str], api_key: str):
         r = requests.get(YT_VIDEOS, params=params, timeout=20)
         r.raise_for_status()
         for it in r.json().get("items", []):
-            snip = it.get("snippet", {})
-            stats = it.get("statistics", {})
-            cd = it.get("contentDetails", {})
+            snip = it.get("snippet", {}) or {}
+            stats = it.get("statistics", {}) or {}
+            cd = it.get("contentDetails", {}) or {}
             ths = snip.get("thumbnails", {}) or {}
             thumb = None
             if ths.get("medium"):
@@ -225,7 +228,7 @@ def cached_video_stats(ids: List[str], api_key: str):
             elif ths.get("default"):
                 thumb = ths["default"].get("url")
             results.append({
-                "videoId": it["id"],
+                "videoId": it.get("id"),
                 "title": snip.get("title"),
                 "channel": snip.get("channelTitle"),
                 "channelId": snip.get("channelId"),
@@ -234,36 +237,38 @@ def cached_video_stats(ids: List[str], api_key: str):
                 "likes": int(stats.get("likeCount", 0)) if stats.get("likeCount") else None,
                 "duration_iso": cd.get("duration"),
                 "duration": parse_iso8601_duration(cd.get("duration")),
-                "url": f"https://www.youtube.com/watch?v={it['id']}",
+                "url": f"https://www.youtube.com/watch?v={it.get('id')}",
                 "thumbnail": thumb
             })
         time.sleep(0.12)
     return results
 
-# -------- New cached channels fetch ----------
 @st.cache_data(ttl=CACHE_TTL_SECONDS, show_spinner=False)
 def cached_channels_info(channel_ids: List[str], api_key: str) -> Dict[str, Dict]:
-    """
-    Fetch channel snippet info (including country if present) for a list of channel ids.
-    Returns dict: channelId -> snippet dict (may include 'country' if set).
-    """
     out = {}
-    unique = list(dict.fromkeys(channel_ids))[:500]  # safety cap
+    unique = list(dict.fromkeys([c for c in channel_ids if c]))[:500]
     for chunk in chunk_list(unique, 50):
-        params = {"part":"snippet,brandingSettings","id":",".join(chunk),"maxResults":len(chunk),"key":api_key}
+        params = {"part":"snippet,statistics","id":",".join(chunk),"maxResults":len(chunk),"key":api_key}
         r = requests.get(YT_CHANNELS, params=params, timeout=20)
         r.raise_for_status()
         for it in r.json().get("items", []):
             cid = it.get("id")
             snip = it.get("snippet", {}) or {}
-            branding = it.get("brandingSettings", {}) or {}
-            # country may be stored in snippet.get('country') depending on channel settings
-            country = snip.get("country")
-            out[cid] = {"snippet": snip, "branding": branding, "country": country}
+            stats = it.get("statistics", {}) or {}
+            thumb = None
+            ths = snip.get("thumbnails", {}) or {}
+            if ths.get("default"):
+                thumb = ths["default"].get("url")
+            out[cid] = {
+                "title": snip.get("title"),
+                "thumbnail": thumb,
+                "country": snip.get("country"),
+                "subscriberCount": int(stats.get("subscriberCount")) if stats.get("subscriberCount") else None
+            }
         time.sleep(0.12)
     return out
 
-# -------- Fetch functions (unchanged) --------
+# -------- Fetch functions --------
 def fetch_trending(region_code: str, max_r: int, api_key: str):
     params = {
         "part":"id,snippet,statistics,contentDetails",
@@ -275,7 +280,7 @@ def fetch_trending(region_code: str, max_r: int, api_key: str):
     r = requests.get(YT_VIDEOS, params=params, timeout=15)
     r.raise_for_status()
     items = r.json().get("items", [])
-    ids = [it["id"] for it in items]
+    ids = [it.get("id") for it in items]
     if not ids:
         return []
     return cached_video_stats(ids, api_key)
@@ -300,7 +305,7 @@ def fetch_keywords(keywords: List[str], days: int, region: str, per_kw_max: int,
         return []
     return cached_video_stats(unique_ids, api_key)
 
-# -------- Run on ENTER (main flow) --------
+# -------- MAIN RUN (ENTER) --------
 if st.button("ENTER"):
     if is_select:
         st.error("Select a mode first.")
@@ -337,35 +342,83 @@ if st.button("ENTER"):
                         df = df[df["views"] >= int(min_views)]
                     df = df.sort_values("views", ascending=False).reset_index(drop=True)
 
-                    # If strict_region enabled -> fetch channel info and filter
+                    # compute video-level velocity (views/day)
+                    now = datetime.now(timezone.utc)
+                    def compute_vpd(published):
+                        try:
+                            dt = published.to_pydatetime() if hasattr(published, "to_pydatetime") else published
+                            delta = now - dt.astimezone(timezone.utc)
+                            days = max(1, delta.days)
+                            return float(df_row_views_map.get(published, 0)) / days  # placeholder replaced below
+                        except Exception:
+                            return 0.0
+
+                    # easier: vectorized compute
+                    published_dates = df["publishedAt"]
+                    days_since = []
+                    for dt in published_dates:
+                        try:
+                            d = now - (dt.to_pydatetime().astimezone(timezone.utc) if hasattr(dt, "to_pydatetime") else dt)
+                            days_since.append(max(1, d.days))
+                        except Exception:
+                            days_since.append(1)
+                    df["days_since"] = days_since
+                    df["views_per_day"] = df.apply(lambda r: r["views"] / r["days_since"] if r["days_since"] > 0 else float(r["views"]), axis=1)
+
+                    # Strict region filter if requested (uses channels info)
                     if strict_region:
-                        # gather unique channel ids
                         channel_ids = df["channelId"].dropna().unique().tolist()
                         if channel_ids:
                             with st.spinner("Applying strict region filter (extra API calls)..."):
                                 chinfo = cached_channels_info(channel_ids, api_key)
-                                # build map channelId -> country (upper)
                                 ch_country = {cid: (chinfo[cid].get("country") or "").upper() for cid in chinfo.keys()}
-                                # filter df where channel country matches selected_region_code
                                 before = len(df)
-                                # only keep rows where channelId maps and equals region_code
                                 df = df[df["channelId"].apply(lambda cid: (cid in ch_country) and (ch_country.get(cid,"") == region_code.upper()))]
                                 after = len(df)
                                 st.info(f"Strict region filter removed {before - after} videos. {after} left.")
                         else:
                             st.info("No channel IDs found to apply strict filter.")
 
-                    # DISPLAY modes
+                    # If channel avatars or channel cards requested -> fetch channel info
+                    channel_info_map = {}
+                    if show_channel_avatar or display_mode == "Card per Channel":
+                        channel_ids = df["channelId"].dropna().unique().tolist()
+                        if channel_ids:
+                            channel_info_map = cached_channels_info(channel_ids, api_key)
+
+                    # apply sorting
+                    # map sort_by to df column names
+                    if sort_by == "views":
+                        sort_col = "views"
+                    elif sort_by == "publishedAt":
+                        sort_col = "publishedAt"
+                    elif sort_by == "views_per_day":
+                        sort_col = "views_per_day"
+                    elif sort_by == "avg_views":
+                        sort_col = "avg_views"  # only valid for channel mode; handled later
+                    else:
+                        sort_col = "views"
+
+                    # DISPLAY: Table / Card per Video / Card per Channel
                     if display_mode == "Table":
-                        st.write(f"Found {len(df)} videos. Showing top results.")
-                        st.dataframe(df[["title","channel","publishedAt","views","likes","duration","url"]].head(200))
+                        st.write(f"Found {len(df)} videos. Showing top results (table).")
+                        df_disp = df.copy()
+                        df_disp["publishedAt"] = df_disp["publishedAt"].apply(lambda x: relative_time(x.isoformat()) if pd.notnull(x) else "")
+                        df_disp["views"] = df_disp["views"].apply(format_count)
+                        df_disp["likes"] = df_disp["likes"].apply(lambda x: format_count(x) if x is not None else "-")
+                        df_disp = df_disp.sort_values(sort_col, ascending=(sort_order == "Ascending"))
+                        st.dataframe(df_disp[["title","channel","publishedAt","views","likes","duration","url"]].head(200))
                         if not df.empty:
-                            st.bar_chart(df.head(10).set_index("title")["views"])
+                            st.bar_chart(df.sort_values("views", ascending=False).head(10).set_index("title")["views"])
 
                     elif display_mode == "Card per Video":
                         st.write(f"Found {len(df)} videos. Showing as cards.")
-                        n_cols = 3
+                        # decide columns: use 4 cols for wide screens (Streamlit collapses on mobile)
+                        n_cols = 4
                         items = df.to_dict(orient="records")
+                        # apply sorting by chosen column
+                        items = sorted(items, key=lambda x: x.get(sort_col, 0) if sort_col in x else 0, reverse=(sort_order=="Descending"))
+                        # render cards
                         for i in range(0, len(items), n_cols):
                             cols = st.columns(n_cols)
                             row_items = items[i:i+n_cols]
@@ -374,51 +427,99 @@ if st.button("ENTER"):
                                     thumb = item.get("thumbnail")
                                     if thumb:
                                         try:
-                                            st.image(thumb, use_column_width=True)
+                                            if layout_size == "Compact":
+                                                st.image(thumb, width=240)
+                                            else:
+                                                st.image(thumb, use_column_width=True)
                                         except Exception:
                                             pass
+                                    # title + link
                                     st.markdown(f"**[{item.get('title')}]({item.get('url')})**")
-                                    st.write(f"_{item.get('channel')}_")
+                                    # channel line with avatar and channel link
+                                    ch_id = item.get("channelId")
+                                    ch_title = item.get("channel")
+                                    ch_thumb = channel_info_map.get(ch_id, {}).get("thumbnail") if channel_info_map else None
+                                    if ch_thumb and layout_size == "Large":
+                                        try:
+                                            st.image(ch_thumb, width=48)
+                                        except Exception:
+                                            pass
+                                    if ch_id:
+                                        ch_url = f"https://www.youtube.com/channel/{ch_id}"
+                                        st.markdown(f"[{ch_title}]({ch_url})")
+                                    else:
+                                        st.write(f"_{ch_title}_")
+                                    # stats row
                                     views_str = format_count(item.get("views", 0))
                                     likes_str = format_count(item.get("likes")) if item.get("likes") is not None else "-"
                                     pub_str = relative_time(item.get("publishedAt").isoformat()) if pd.notnull(item.get("publishedAt")) else ""
                                     duration = item.get("duration") or ""
-                                    st.markdown(f"**Views:** {views_str} &nbsp;&nbsp; **Likes:** {likes_str}")
-                                    st.markdown(f"**Published:** {pub_str} &nbsp;&nbsp; **Duration:** {duration}")
+                                    # velocity badge
+                                    vpd = item.get("views_per_day", 0.0)
+                                    vpd_str = format_count(int(round(vpd)))
+                                    st.markdown(f"**Views:** {views_str}  |  **Likes:** {likes_str}")
+                                    st.markdown(f"**Published:** {pub_str}  |  **Duration:** {duration}  |  **Velocity:** {vpd_str}/day")
                                     st.markdown("---")
 
                     else:  # Card per Channel
                         st.write(f"Found content from {df['channel'].nunique()} channels. Showing channel cards.")
-                        grouped = df.groupby(["channel","channelId"], as_index=False).agg(
+                        # aggregate by channel
+                        grp = df.groupby(["channel","channelId"], as_index=False).agg(
                             total_views = pd.NamedAgg(column="views", aggfunc="sum"),
                             avg_views = pd.NamedAgg(column="views", aggfunc="mean"),
                             videos = pd.NamedAgg(column="title", aggfunc=lambda s: list(s)[:3]),
-                            sample_thumb = pd.NamedAgg(column="thumbnail", aggfunc=lambda s: next((x for x in s if x), None))
+                            thumbs = pd.NamedAgg(column="thumbnail", aggfunc=lambda s: next((x for x in s if x), None)),
+                            avg_vpd = pd.NamedAgg(column="views_per_day", aggfunc="mean")
                         )
-                        grouped = grouped.sort_values("total_views", ascending=False).to_dict(orient="records")
+                        # integrate channel_info_map for avatars/subcounts
+                        def get_avatar(cid, fallback):
+                            if channel_info_map and cid in channel_info_map:
+                                return channel_info_map[cid].get("thumbnail") or fallback
+                            return fallback
+                        grp["avatar"] = grp.apply(lambda r: get_avatar(r["channelId"], r["thumbs"]), axis=1)
+                        # sorting: if sort_by == avg_views use avg_views, else views/publishedAt/velocity handled
+                        if sort_by == "avg_views":
+                            grp = grp.sort_values("avg_views", ascending=(sort_order=="Ascending"))
+                        elif sort_by == "views_per_day":
+                            grp = grp.sort_values("avg_vpd", ascending=(sort_order=="Ascending"))
+                        else:
+                            # default sort by total_views or publishedAt not meaningful for channels
+                            grp = grp.sort_values("total_views", ascending=(sort_order=="Ascending"))
+                        grouped = grp.to_dict(orient="records")
                         n_cols = 2
                         for i in range(0, len(grouped), n_cols):
                             cols = st.columns(n_cols)
                             row = grouped[i:i+n_cols]
                             for col, ch in zip(cols, row):
                                 with col:
-                                    thumb = ch.get("sample_thumb")
+                                    thumb = ch.get("avatar")
                                     if thumb:
                                         try:
-                                            st.image(thumb, width=240)
+                                            if layout_size == "Compact":
+                                                st.image(thumb, width=140)
+                                            else:
+                                                st.image(thumb, width=240)
                                         except Exception:
                                             pass
                                     st.markdown(f"### {ch.get('channel')}")
                                     tv = format_count(int(ch.get("total_views",0)))
                                     av = format_count(int(round(ch.get("avg_views",0))))
-                                    st.markdown(f"**Total views (sample):** {tv} &nbsp;&nbsp; **Avg/views:** {av}")
+                                    sv = format_count(int(round(ch.get("avg_vpd",0))))
+                                    st.markdown(f"**Total views (sample):** {tv}  |  **Avg views:** {av}  |  **Avg/day:** {sv}")
+                                    # channel link button
+                                    cid = ch.get("channelId")
+                                    if cid:
+                                        ch_url = f"https://www.youtube.com/channel/{cid}"
+                                        st.markdown(f"[Open channel]({ch_url})")
                                     vids = ch.get("videos") or []
                                     for v in vids:
                                         st.write(f"- {v}")
                                     st.markdown("---")
 
+                    # download CSV
                     csv = df.to_csv(index=False).encode("utf-8")
                     st.download_button("Download CSV", csv, file_name="yt_results.csv", mime="text/csv")
+
             except requests.HTTPError as e:
                 st.error(f"API error: {e}")
             except Exception as e:
