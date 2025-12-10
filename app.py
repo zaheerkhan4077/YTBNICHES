@@ -130,7 +130,7 @@ def parse_iso8601_duration(duration_str: str) -> str:
     return f"{mins}:{secs:02d}"
 
 # -------- UI SETUP --------
-st.set_page_config(layout="wide", page_title="YTBNICHES- Your Personalized Data Extractor")
+st.set_page_config(layout="wide", page_title="YTBNICHES- Your Personalized ddata Extractor")
 st.title("YTBNICHES- Your Personalized data Extractor")
 
 # API key retrieval
