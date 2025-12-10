@@ -162,7 +162,7 @@ with col2:
     DAYS_OPTIONS = ["Select", 7, 10, 30, 90]
     days_choice = st.selectbox("Days", DAYS_OPTIONS, index=0, disabled=is_trending, key="days_select")
 with col3:
-    max_results = st.slider("Max results per keyword / trending list", 1, 5, 2, key="max_results")
+    max_results = st.slider("Max results per keyword / trending list", 1, 5, 1, key="max_results")
 with col4:
     force_refresh = st.checkbox("Force refresh (ignore cache)", key="force_refresh")
 
