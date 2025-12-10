@@ -176,7 +176,7 @@ min_views = st.number_input("Minimum total views filter (0 to skip)", min_value=
 display_mode = st.selectbox("View mode", ["Table", "Card per Video", "Card per Channel"], index=1)
 
 # New: strict region checkbox
-strict_region = st.checkbox("Strict region filter (drop videos whose channel country ≠ selected region). Uses extra API calls.", value=False)
+strict_region = st.checkbox("Strict region filter (drop videos whose channel country ≠ selected region).", value=False)
 
 st.caption("Cache will save results for 24 hours. Keep keywords and max results small to save quota.")
 
