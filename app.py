@@ -104,7 +104,7 @@ col1, col2, col3, col4 = st.columns([2,2,1,1])
 
 # REGION: searchable dropdown with built-in filter (selectbox)
 with col1:
-    selected_opt = st.selectbox("🔍 Region (code - country)", [""] + ALL_COUNTRIES_LIST, format_func=lambda x: x, placeholder="#SELECT COUNTRY" , index=0, key="region_select")
+    selected_opt = st.selectbox("🔍 Region (code - country)", [""] + ALL_COUNTRIES_LIST, format_func=lambda x: x or placeholder="#SELECT COUNTRY" , index=0, key="region_select")
     # extract ISO code (used later)
     selected_region_code = code_from_option(selected_opt) if selected_opt else ""
 
