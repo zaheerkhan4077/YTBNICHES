@@ -169,9 +169,8 @@ with col4:
 keywords_input = st.text_input("Keywords", value="", placeholder="#TYPE YOUR KEYWORDS", disabled=is_trending, key="keywords_input")
 min_views = st.number_input("Minimum total views filter (0 to skip)", min_value=0, value=0, step=100, key="min_views")
 
-# Display & layout controls
+# Display & toolbar controls (layout size removed)
 display_mode = st.selectbox("View mode", ["Table", "Card per Video", "Card per Channel"], index=1)
-layout_size = st.radio("Layout size", ["Compact", "Large"], index=0, horizontal=True)
 # Sorting toolbar
 sort_by = st.selectbox("Sort by", ["views", "publishedAt", "views_per_day", "avg_views"], index=0)
 sort_order = st.radio("Order", ["Descending", "Ascending"], index=0, horizontal=True)
@@ -371,7 +370,7 @@ if st.button("ENTER"):
 
                     # If channel avatars or channel cards requested -> fetch channel info
                     channel_info_map = {}
-                    if show_channel_avatar or display_mode == "Card per Channel":
+                    if show_channel_avatar or display_mode == "Card per Channel" or True:
                         channel_ids = df["channelId"].dropna().unique().tolist()
                         if channel_ids:
                             channel_info_map = cached_channels_info(channel_ids, api_key)
@@ -407,14 +406,23 @@ if st.button("ENTER"):
                         items = sorted(items, key=lambda x: x.get(sort_col, 0) if sort_col in x else 0, reverse=(sort_order=="Descending"))
                         # responsive heuristic for columns:
                         total = len(items)
-                        if total >= 12:
+                        if total >= 16:
                             n_cols = 4
-                        elif 6 <= total < 12:
+                        elif 9 <= total < 16:
                             n_cols = 3
-                        elif 3 <= total < 6:
+                        elif 4 <= total < 9:
                             n_cols = 2
                         else:
                             n_cols = 1
+                        # set thumbnail width based on columns
+                        if n_cols >= 4:
+                            thumb_w = 150
+                        elif n_cols == 3:
+                            thumb_w = 200
+                        elif n_cols == 2:
+                            thumb_w = 300
+                        else:
+                            thumb_w = 450
                         # render cards
                         for i in range(0, len(items), n_cols):
                             cols = st.columns(n_cols)
@@ -424,30 +432,19 @@ if st.button("ENTER"):
                                     thumb = item.get("thumbnail")
                                     if thumb:
                                         try:
-                                            if layout_size == "Compact":
-                                                st.image(thumb, width=240)
-                                            else:
-                                                st.image(thumb, use_column_width=True)
+                                            st.image(thumb, width=thumb_w)
                                         except Exception:
                                             pass
                                     st.markdown(f"**[{item.get('title')}]({item.get('url')})**")
                                     ch_id = item.get("channelId")
                                     ch_title = item.get("channel")
-                                    ch_thumb = channel_info_map.get(ch_id, {}).get("thumbnail") if channel_info_map else None
-                                    if ch_thumb and layout_size == "Large":
-                                        try:
-                                            st.image(ch_thumb, width=48)
-                                        except Exception:
-                                            pass
+                                    ch_info = channel_info_map.get(ch_id, {}) if channel_info_map else {}
+                                    ch_thumb = ch_info.get("thumbnail")
+                                    subs = ch_info.get("subscriberCount")
+                                    subs_display = format_count(subs) if subs is not None else "N/A"
                                     if ch_id:
                                         ch_url = f"https://www.youtube.com/channel/{ch_id}"
-                                        # show channel title and link
-                                        sub_count = channel_info_map.get(ch_id, {}).get("subscriberCount") if channel_info_map else None
-                                        if sub_count:
-                                            sub_str = format_count(sub_count)
-                                            st.markdown(f"[{ch_title}]({ch_url}) • **{sub_str} subs**")
-                                        else:
-                                            st.markdown(f"[{ch_title}]({ch_url})")
+                                        st.markdown(f"[{ch_title}]({ch_url}) • **{subs_display} subs**")
                                     else:
                                         st.write(f"_{ch_title}_")
                                     views_str = format_count(item.get("views", 0))
@@ -488,7 +485,7 @@ if st.button("ENTER"):
                         else:
                             grp = grp.sort_values("total_views", ascending=(sort_order=="Ascending"))
                         grouped = grp.to_dict(orient="records")
-                        # channel cards: 2 per row for readability
+                        # channel cards: 2 per row
                         n_cols = 2
                         for i in range(0, len(grouped), n_cols):
                             cols = st.columns(n_cols)
@@ -498,10 +495,7 @@ if st.button("ENTER"):
                                     thumb = ch.get("avatar")
                                     if thumb:
                                         try:
-                                            if layout_size == "Compact":
-                                                st.image(thumb, width=140)
-                                            else:
-                                                st.image(thumb, width=240)
+                                            st.image(thumb, width=220)
                                         except Exception:
                                             pass
                                     st.markdown(f"### {ch.get('channel')}")
