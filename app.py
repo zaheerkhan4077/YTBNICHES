@@ -1,4 +1,5 @@
 # app.py
+# ---- only full file provided so you can replace current app.py ----
 import os
 import time
 from datetime import datetime, timedelta, timezone
@@ -10,10 +11,11 @@ import streamlit as st
 # -------- CONFIG --------
 YT_SEARCH = "https://www.googleapis.com/youtube/v3/search"
 YT_VIDEOS = "https://www.googleapis.com/youtube/v3/videos"
+YT_CHANNELS = "https://www.googleapis.com/youtube/v3/channels"
 CACHE_TTL_SECONDS = 24 * 60 * 60
 SAFETY_MAX_IDS = 500
 
-# -------- FULL COUNTRY LIST (ISO -> Name) --------
+# (COUNTRIES, ALL_COUNTRIES_LIST, helpers, etc. remain identical to previous version)
 COUNTRIES = {
     "AF":"Afghanistan","AL":"Albania","DZ":"Algeria","AS":"American Samoa","AD":"Andorra",
     "AO":"Angola","AG":"Antigua and Barbuda","AR":"Argentina","AM":"Armenia","AU":"Australia",
@@ -56,7 +58,6 @@ COUNTRIES = {
     "UY":"Uruguay","UZ":"Uzbekistan","VU":"Vanuatu","VA":"Vatican City","VE":"Venezuela",
     "VN":"Vietnam","YE":"Yemen","ZM":"Zambia","ZW":"Zimbabwe"
 }
-
 ALL_COUNTRIES_LIST = [f"{code} - {name}" for code, name in sorted(COUNTRIES.items(), key=lambda x: x[1])]
 
 # -------- HELPERS --------
@@ -73,11 +74,10 @@ def code_from_option(opt: str) -> str:
     return opt.split(" - ")[0].strip().upper()
 
 def format_count(n):
-    # human readable: 12k, 1.2M
     try:
         n = int(n)
     except Exception:
-        return str(n)
+        return str(n) if n is not None else "-"
     if n >= 1_000_000_000:
         return f"{n/1_000_000_000:.1f}B".rstrip('0').rstrip('.')
     if n >= 1_000_000:
@@ -87,7 +87,6 @@ def format_count(n):
     return str(n)
 
 def relative_time(published_at_iso: str) -> str:
-    # returns e.g., "3 days ago", "3mo", "1 year"
     try:
         dt = datetime.fromisoformat(published_at_iso.replace("Z", "+00:00"))
     except Exception:
@@ -110,11 +109,36 @@ def relative_time(published_at_iso: str) -> str:
         return f"{days//30}mo ago"
     return f"{days//365}y ago"
 
+def parse_iso8601_duration(duration_str: str) -> str:
+    """
+    Convert ISO 8601 duration like 'PT18M57S' or 'PT1H2M3S' into human readable H:MM:SS or M:SS.
+    """
+    if not duration_str:
+        return ""
+    s = duration_str.upper().replace("PT", "")
+    hours = mins = secs = 0
+    num = ""
+    for ch in s:
+        if ch.isdigit():
+            num += ch
+        else:
+            if ch == "H":
+                hours = int(num) if num else 0
+            elif ch == "M":
+                mins = int(num) if num else 0
+            elif ch == "S":
+                secs = int(num) if num else 0
+            num = ""
+    # format
+    if hours > 0:
+        return f"{hours}:{mins:02d}:{secs:02d}"
+    return f"{mins}:{secs:02d}"
+
 # -------- UI SETUP --------
 st.set_page_config(layout="wide", page_title="YTBNICHES- Your Personalized data Extractor")
 st.title("YTBNICHES- Your Personalized data Extractor")
 
-# API key
+# API key retrieval (unchanged)
 api_key = None
 try:
     api_key = st.secrets.get("YT_API_KEY")
@@ -130,49 +154,41 @@ if not api_key:
     st.warning("Add your API key in Streamlit Secrets or paste it above.")
     st.stop()
 
-# Mode + small controls
+# Controls (unchanged; added strict region checkbox)
 mode = st.selectbox("Mode", ["Select", "Keyword search (last N days)", "Trending (region)"], index=0)
 is_trending = (mode == "Trending (region)")
 is_select = (mode == "Select")
 
 col1, col2, col3, col4 = st.columns([2,2,1,1])
-
-# Region dropdown (searchable)
 with col1:
     selected_opt = st.selectbox("🔍 Region (code - country)", [""] + ALL_COUNTRIES_LIST, format_func=lambda x: x or "#SELECT COUNTRY", index=0, key="region_select")
     selected_region_code = code_from_option(selected_opt) if selected_opt else ""
-
-# Days select
 with col2:
     DAYS_OPTIONS = ["Select", 7, 10, 30, 90]
     days_choice = st.selectbox("Days", DAYS_OPTIONS, index=0, disabled=is_trending, key="days_select")
-
-# Max results
 with col3:
     max_results = st.slider("Max results per keyword / trending list", 1, 5, 2, key="max_results")
-
-# Force refresh
 with col4:
     force_refresh = st.checkbox("Force refresh (ignore cache)", key="force_refresh")
 
-# Keywords
 keywords_input = st.text_input("Keywords", value="", placeholder="#TYPE YOUR KEYWORDS", disabled=is_trending, key="keywords_input")
 min_views = st.number_input("Minimum total views filter (0 to skip)", min_value=0, value=0, step=100, key="min_views")
-
-# New: Display mode selector (Table | Card per Video | Card per Channel)
 display_mode = st.selectbox("View mode", ["Table", "Card per Video", "Card per Channel"], index=1)
+
+# New: strict region checkbox
+strict_region = st.checkbox("Strict region filter (drop videos whose channel country ≠ selected region). Uses extra API calls.", value=False)
 
 st.caption("Cache will save results for 24 hours. Keep keywords and max results small to save quota.")
 
+# Cache clear on force refresh
 if force_refresh:
-    # clear caches (defined below) after they exist
     try:
         cached_search_ids.clear()
         cached_video_stats.clear()
     except Exception:
         pass
 
-# -------- CACHED API CALLS (include thumbnail in snippet) --------
+# -------- CACHED API CALLS (thumbnail + channelId included) --------
 @st.cache_data(ttl=CACHE_TTL_SECONDS, show_spinner=False)
 def cached_search_ids(keyword: str, published_after: str, max_results:int, region:str, api_key:str):
     params = {
@@ -200,9 +216,8 @@ def cached_video_stats(ids: List[str], api_key: str):
             snip = it.get("snippet", {})
             stats = it.get("statistics", {})
             cd = it.get("contentDetails", {})
-            # thumbnail safe extraction (prefer medium, then default)
-            thumb = None
             ths = snip.get("thumbnails", {}) or {}
+            thumb = None
             if ths.get("medium"):
                 thumb = ths["medium"].get("url")
             elif ths.get("high"):
@@ -217,12 +232,36 @@ def cached_video_stats(ids: List[str], api_key: str):
                 "publishedAt": snip.get("publishedAt"),
                 "views": int(stats.get("viewCount", 0)) if stats.get("viewCount") else 0,
                 "likes": int(stats.get("likeCount", 0)) if stats.get("likeCount") else None,
-                "duration": cd.get("duration"),
+                "duration_iso": cd.get("duration"),
+                "duration": parse_iso8601_duration(cd.get("duration")),
                 "url": f"https://www.youtube.com/watch?v={it['id']}",
                 "thumbnail": thumb
             })
         time.sleep(0.12)
     return results
+
+# -------- New cached channels fetch ----------
+@st.cache_data(ttl=CACHE_TTL_SECONDS, show_spinner=False)
+def cached_channels_info(channel_ids: List[str], api_key: str) -> Dict[str, Dict]:
+    """
+    Fetch channel snippet info (including country if present) for a list of channel ids.
+    Returns dict: channelId -> snippet dict (may include 'country' if set).
+    """
+    out = {}
+    unique = list(dict.fromkeys(channel_ids))[:500]  # safety cap
+    for chunk in chunk_list(unique, 50):
+        params = {"part":"snippet,brandingSettings","id":",".join(chunk),"maxResults":len(chunk),"key":api_key}
+        r = requests.get(YT_CHANNELS, params=params, timeout=20)
+        r.raise_for_status()
+        for it in r.json().get("items", []):
+            cid = it.get("id")
+            snip = it.get("snippet", {}) or {}
+            branding = it.get("brandingSettings", {}) or {}
+            # country may be stored in snippet.get('country') depending on channel settings
+            country = snip.get("country")
+            out[cid] = {"snippet": snip, "branding": branding, "country": country}
+        time.sleep(0.12)
+    return out
 
 # -------- Fetch functions (unchanged) --------
 def fetch_trending(region_code: str, max_r: int, api_key: str):
@@ -261,7 +300,7 @@ def fetch_keywords(keywords: List[str], days: int, region: str, per_kw_max: int,
         return []
     return cached_video_stats(unique_ids, api_key)
 
-# -------- Run on ENTER --------
+# -------- Run on ENTER (main flow) --------
 if st.button("ENTER"):
     if is_select:
         st.error("Select a mode first.")
@@ -292,14 +331,31 @@ if st.button("ENTER"):
                 if not rows:
                     st.info("No results found.")
                 else:
-                    # build DataFrame
                     df = pd.DataFrame(rows)
                     df["publishedAt"] = pd.to_datetime(df["publishedAt"], errors="coerce")
                     if min_views > 0:
                         df = df[df["views"] >= int(min_views)]
                     df = df.sort_values("views", ascending=False).reset_index(drop=True)
 
-                    # DISPLAY: Table / Card per Video / Card per Channel
+                    # If strict_region enabled -> fetch channel info and filter
+                    if strict_region:
+                        # gather unique channel ids
+                        channel_ids = df["channelId"].dropna().unique().tolist()
+                        if channel_ids:
+                            with st.spinner("Applying strict region filter (extra API calls)..."):
+                                chinfo = cached_channels_info(channel_ids, api_key)
+                                # build map channelId -> country (upper)
+                                ch_country = {cid: (chinfo[cid].get("country") or "").upper() for cid in chinfo.keys()}
+                                # filter df where channel country matches selected_region_code
+                                before = len(df)
+                                # only keep rows where channelId maps and equals region_code
+                                df = df[df["channelId"].apply(lambda cid: (cid in ch_country) and (ch_country.get(cid,"") == region_code.upper()))]
+                                after = len(df)
+                                st.info(f"Strict region filter removed {before - after} videos. {after} left.")
+                        else:
+                            st.info("No channel IDs found to apply strict filter.")
+
+                    # DISPLAY modes
                     if display_mode == "Table":
                         st.write(f"Found {len(df)} videos. Showing top results.")
                         st.dataframe(df[["title","channel","publishedAt","views","likes","duration","url"]].head(200))
@@ -308,7 +364,6 @@ if st.button("ENTER"):
 
                     elif display_mode == "Card per Video":
                         st.write(f"Found {len(df)} videos. Showing as cards.")
-                        # responsive columns: 3 per row on desktop
                         n_cols = 3
                         items = df.to_dict(orient="records")
                         for i in range(0, len(items), n_cols):
@@ -316,7 +371,6 @@ if st.button("ENTER"):
                             row_items = items[i:i+n_cols]
                             for col, item in zip(cols, row_items):
                                 with col:
-                                    # card container
                                     thumb = item.get("thumbnail")
                                     if thumb:
                                         try:
@@ -325,25 +379,22 @@ if st.button("ENTER"):
                                             pass
                                     st.markdown(f"**[{item.get('title')}]({item.get('url')})**")
                                     st.write(f"_{item.get('channel')}_")
-                                    # stats row
                                     views_str = format_count(item.get("views", 0))
                                     likes_str = format_count(item.get("likes")) if item.get("likes") is not None else "-"
                                     pub_str = relative_time(item.get("publishedAt").isoformat()) if pd.notnull(item.get("publishedAt")) else ""
                                     duration = item.get("duration") or ""
-                                    st.markdown(f"**Views:** {views_str} &nbsp;&nbsp; **Likes:** {likes_str}  ")
+                                    st.markdown(f"**Views:** {views_str} &nbsp;&nbsp; **Likes:** {likes_str}")
                                     st.markdown(f"**Published:** {pub_str} &nbsp;&nbsp; **Duration:** {duration}")
                                     st.markdown("---")
 
                     else:  # Card per Channel
                         st.write(f"Found content from {df['channel'].nunique()} channels. Showing channel cards.")
-                        # aggregate by channel
                         grouped = df.groupby(["channel","channelId"], as_index=False).agg(
                             total_views = pd.NamedAgg(column="views", aggfunc="sum"),
                             avg_views = pd.NamedAgg(column="views", aggfunc="mean"),
                             videos = pd.NamedAgg(column="title", aggfunc=lambda s: list(s)[:3]),
                             sample_thumb = pd.NamedAgg(column="thumbnail", aggfunc=lambda s: next((x for x in s if x), None))
                         )
-                        # sort by total_views desc
                         grouped = grouped.sort_values("total_views", ascending=False).to_dict(orient="records")
                         n_cols = 2
                         for i in range(0, len(grouped), n_cols):
@@ -366,7 +417,6 @@ if st.button("ENTER"):
                                         st.write(f"- {v}")
                                     st.markdown("---")
 
-                    # CSV download (always available)
                     csv = df.to_csv(index=False).encode("utf-8")
                     st.download_button("Download CSV", csv, file_name="yt_results.csv", mime="text/csv")
             except requests.HTTPError as e:
