@@ -173,7 +173,7 @@ with col4:
 
 keywords_input = st.text_input("Keywords", value="", placeholder="#TYPE YOUR KEYWORDS", disabled=is_trending, key="keywords_input")
 min_views = st.number_input("Minimum total views filter (0 to skip)", min_value=0, value=0, step=100, key="min_views")
-display_mode = st.selectbox("View mode", ["Select", "Table", "Card per Video", "Card per Channel"], index=0)
+display_mode = st.selectbox("View mode", ["Table", "Card per Video", "Card per Channel"], index=0)
 
 # New: strict region checkbox
 strict_region = st.checkbox("Strict region filter (drop videos whose channel country ≠ selected region).", value=False)
