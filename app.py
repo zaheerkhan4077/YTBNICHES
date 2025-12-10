@@ -154,7 +154,7 @@ mode = st.selectbox("Mode", ["Select", "Keyword search (last N days)", "Trending
 is_trending = (mode == "Trending (region)")
 is_select = (mode == "Select")
 
-col1, col2, col3, col4 = st.columns([2,2,1,1])
+col1, col2, col3, col4, col5 = st.columns([2,2,1,1,1])
 with col1:
     selected_opt = st.selectbox("🔍 Region (code - country)", [""] + ALL_COUNTRIES_LIST, format_func=lambda x: x or "#SELECT COUNTRY", index=0, key="region_select")
     selected_region_code = code_from_option(selected_opt) if selected_opt else ""
@@ -162,14 +162,17 @@ with col2:
     DAYS_OPTIONS = ["Select", 7, 10, 30, 90]
     days_choice = st.selectbox("Days", DAYS_OPTIONS, index=0, disabled=is_trending, key="days_select")
 with col3:
-    max_results = st.slider("Max results per keyword / trending list", 1, 5, 1, key="max_results")
+    max_results = st.slider("Max results per keyword / trending list", 1, 5, 2, key="max_results")
 with col4:
     force_refresh = st.checkbox("Force refresh (ignore cache)", key="force_refresh")
+# New Subscriber input column
+with col5:
+    subscriber_raw = st.text_input("Subscriber", value="1000", placeholder="#SELECT SUBSCRIBER RANGE", key="subscriber_input")
 
 keywords_input = st.text_input("Keywords", value="", placeholder="#TYPE YOUR KEYWORDS", disabled=is_trending, key="keywords_input")
 min_views = st.number_input("Minimum total views filter (0 to skip)", min_value=0, value=0, step=100, key="min_views")
 
-# Display & toolbar controls (layout size removed)
+# Display & toolbar controls
 display_mode = st.selectbox("View mode", ["Table", "Card per Video", "Card per Channel"], index=1)
 # Sorting toolbar
 sort_by = st.selectbox("Sort by", ["views", "publishedAt", "views_per_day", "avg_views"], index=0)
@@ -180,6 +183,15 @@ show_channel_avatar = st.checkbox("Show channel avatars", value=True)
 strict_region = st.checkbox("Strict region filter (drop videos whose channel country ≠ selected region).", value=False)
 
 st.caption("Cache will save results for 24 hours.")
+
+# parse subscriber input safely
+try:
+    subscriber_min = int(subscriber_raw.replace(",", "").strip())
+    if subscriber_min < 0:
+        subscriber_min = 0
+except Exception:
+    subscriber_min = 1000
+    st.warning("Subscriber input invalid — defaulting to 1000.")
 
 # Clear caches on force refresh
 if force_refresh:
@@ -370,10 +382,27 @@ if st.button("ENTER"):
 
                     # If channel avatars or channel cards requested -> fetch channel info
                     channel_info_map = {}
-                    if show_channel_avatar or display_mode == "Card per Channel" or True:
-                        channel_ids = df["channelId"].dropna().unique().tolist()
-                        if channel_ids:
-                            channel_info_map = cached_channels_info(channel_ids, api_key)
+                    # always fetch channel info when we need subscriber filtering or avatars or channel cards
+                    channel_ids = df["channelId"].dropna().unique().tolist()
+                    if channel_ids:
+                        channel_info_map = cached_channels_info(channel_ids, api_key)
+
+                    # Apply subscriber filter using channel_info_map (only if we have channel info)
+                    if subscriber_min and channel_info_map:
+                        before = len(df)
+                        def keep_by_subs(cid):
+                            if not cid:
+                                return True  # keep if we can't check
+                            info = channel_info_map.get(cid)
+                            if not info:
+                                return True  # keep if missing info
+                            subs = info.get("subscriberCount")
+                            if subs is None:
+                                return True  # keep when subscriber count unknown
+                            return int(subs) >= int(subscriber_min)
+                        df = df[df["channelId"].apply(keep_by_subs)]
+                        after = len(df)
+                        st.info(f"Subscriber filter removed {before - after} videos. {after} left.")
 
                     # apply sorting
                     if sort_by == "views":
