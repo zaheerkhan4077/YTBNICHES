@@ -177,7 +177,7 @@ sort_by = st.selectbox("Sort by", ["views", "publishedAt", "views_per_day", "avg
 sort_order = st.radio("Order", ["Descending", "Ascending"], index=0, horizontal=True)
 # Channel avatar toggle (only fetch channels when needed)
 show_channel_avatar = st.checkbox("Show channel avatars (may use extra API calls)", value=True)
-# Strict region filter option (keeps previous behavior)
+# Strict region filter option
 strict_region = st.checkbox("Strict region filter (drop videos whose channel country ≠ selected region). Uses extra API calls.", value=False)
 
 st.caption("Cache will save results for 24 hours. Keep keywords and max results small to save quota.")
@@ -344,16 +344,6 @@ if st.button("ENTER"):
 
                     # compute video-level velocity (views/day)
                     now = datetime.now(timezone.utc)
-                    def compute_vpd(published):
-                        try:
-                            dt = published.to_pydatetime() if hasattr(published, "to_pydatetime") else published
-                            delta = now - dt.astimezone(timezone.utc)
-                            days = max(1, delta.days)
-                            return float(df_row_views_map.get(published, 0)) / days  # placeholder replaced below
-                        except Exception:
-                            return 0.0
-
-                    # easier: vectorized compute
                     published_dates = df["publishedAt"]
                     days_since = []
                     for dt in published_dates:
@@ -387,7 +377,6 @@ if st.button("ENTER"):
                             channel_info_map = cached_channels_info(channel_ids, api_key)
 
                     # apply sorting
-                    # map sort_by to df column names
                     if sort_by == "views":
                         sort_col = "views"
                     elif sort_by == "publishedAt":
@@ -395,7 +384,7 @@ if st.button("ENTER"):
                     elif sort_by == "views_per_day":
                         sort_col = "views_per_day"
                     elif sort_by == "avg_views":
-                        sort_col = "avg_views"  # only valid for channel mode; handled later
+                        sort_col = "avg_views"
                     else:
                         sort_col = "views"
 
@@ -413,11 +402,19 @@ if st.button("ENTER"):
 
                     elif display_mode == "Card per Video":
                         st.write(f"Found {len(df)} videos. Showing as cards.")
-                        # decide columns: use 4 cols for wide screens (Streamlit collapses on mobile)
-                        n_cols = 4
                         items = df.to_dict(orient="records")
                         # apply sorting by chosen column
                         items = sorted(items, key=lambda x: x.get(sort_col, 0) if sort_col in x else 0, reverse=(sort_order=="Descending"))
+                        # responsive heuristic for columns:
+                        total = len(items)
+                        if total >= 12:
+                            n_cols = 4
+                        elif 6 <= total < 12:
+                            n_cols = 3
+                        elif 3 <= total < 6:
+                            n_cols = 2
+                        else:
+                            n_cols = 1
                         # render cards
                         for i in range(0, len(items), n_cols):
                             cols = st.columns(n_cols)
@@ -433,9 +430,7 @@ if st.button("ENTER"):
                                                 st.image(thumb, use_column_width=True)
                                         except Exception:
                                             pass
-                                    # title + link
                                     st.markdown(f"**[{item.get('title')}]({item.get('url')})**")
-                                    # channel line with avatar and channel link
                                     ch_id = item.get("channelId")
                                     ch_title = item.get("channel")
                                     ch_thumb = channel_info_map.get(ch_id, {}).get("thumbnail") if channel_info_map else None
@@ -446,15 +441,19 @@ if st.button("ENTER"):
                                             pass
                                     if ch_id:
                                         ch_url = f"https://www.youtube.com/channel/{ch_id}"
-                                        st.markdown(f"[{ch_title}]({ch_url})")
+                                        # show channel title and link
+                                        sub_count = channel_info_map.get(ch_id, {}).get("subscriberCount") if channel_info_map else None
+                                        if sub_count:
+                                            sub_str = format_count(sub_count)
+                                            st.markdown(f"[{ch_title}]({ch_url}) • **{sub_str} subs**")
+                                        else:
+                                            st.markdown(f"[{ch_title}]({ch_url})")
                                     else:
                                         st.write(f"_{ch_title}_")
-                                    # stats row
                                     views_str = format_count(item.get("views", 0))
                                     likes_str = format_count(item.get("likes")) if item.get("likes") is not None else "-"
                                     pub_str = relative_time(item.get("publishedAt").isoformat()) if pd.notnull(item.get("publishedAt")) else ""
                                     duration = item.get("duration") or ""
-                                    # velocity badge
                                     vpd = item.get("views_per_day", 0.0)
                                     vpd_str = format_count(int(round(vpd)))
                                     st.markdown(f"**Views:** {views_str}  |  **Likes:** {likes_str}")
@@ -463,7 +462,6 @@ if st.button("ENTER"):
 
                     else:  # Card per Channel
                         st.write(f"Found content from {df['channel'].nunique()} channels. Showing channel cards.")
-                        # aggregate by channel
                         grp = df.groupby(["channel","channelId"], as_index=False).agg(
                             total_views = pd.NamedAgg(column="views", aggfunc="sum"),
                             avg_views = pd.NamedAgg(column="views", aggfunc="mean"),
@@ -476,16 +474,21 @@ if st.button("ENTER"):
                             if channel_info_map and cid in channel_info_map:
                                 return channel_info_map[cid].get("thumbnail") or fallback
                             return fallback
+                        def get_subs(cid):
+                            if channel_info_map and cid in channel_info_map:
+                                return channel_info_map[cid].get("subscriberCount")
+                            return None
                         grp["avatar"] = grp.apply(lambda r: get_avatar(r["channelId"], r["thumbs"]), axis=1)
-                        # sorting: if sort_by == avg_views use avg_views, else views/publishedAt/velocity handled
+                        grp["subs"] = grp.apply(lambda r: get_subs(r["channelId"]), axis=1)
+                        # sorting
                         if sort_by == "avg_views":
                             grp = grp.sort_values("avg_views", ascending=(sort_order=="Ascending"))
                         elif sort_by == "views_per_day":
                             grp = grp.sort_values("avg_vpd", ascending=(sort_order=="Ascending"))
                         else:
-                            # default sort by total_views or publishedAt not meaningful for channels
                             grp = grp.sort_values("total_views", ascending=(sort_order=="Ascending"))
                         grouped = grp.to_dict(orient="records")
+                        # channel cards: 2 per row for readability
                         n_cols = 2
                         for i in range(0, len(grouped), n_cols):
                             cols = st.columns(n_cols)
@@ -505,8 +508,9 @@ if st.button("ENTER"):
                                     tv = format_count(int(ch.get("total_views",0)))
                                     av = format_count(int(round(ch.get("avg_views",0))))
                                     sv = format_count(int(round(ch.get("avg_vpd",0))))
-                                    st.markdown(f"**Total views (sample):** {tv}  |  **Avg views:** {av}  |  **Avg/day:** {sv}")
-                                    # channel link button
+                                    subs = ch.get("subs")
+                                    subs_str = format_count(subs) if subs is not None else "N/A"
+                                    st.markdown(f"**Subscribers:** {subs_str}  |  **Total views (sample):** {tv}  |  **Avg/day:** {sv}")
                                     cid = ch.get("channelId")
                                     if cid:
                                         ch_url = f"https://www.youtube.com/channel/{cid}"
